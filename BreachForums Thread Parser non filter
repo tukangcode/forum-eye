@@ -1,0 +1,144 @@
+// ==UserScript==
+// @name         BreachForums Thread Parser Non filter edition
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Parses and displays forum threads on breachforums.st, preventing duplicates and allowing data export.
+// @author       Tukangcode & Ai-sama
+// @match        https://breachforums.st/Forum-Databases*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // Function to create the parser container UI
+    function createParserUI() {
+        // Avoid creating multiple containers
+        if (document.getElementById('parser-container')) return;
+
+        const container = document.createElement('div');
+        container.id = 'parser-container';
+        container.style.position = 'fixed';
+        container.style.top = '10px';
+        container.style.right = '10px';
+        container.style.width = '300px';
+        container.style.maxHeight = '80vh';
+        container.style.overflowY = 'auto';
+        container.style.padding = '15px';
+        container.style.backgroundColor = '#ffffff';
+        container.style.border = '2px solid #3498db';
+        container.style.borderRadius = '8px';
+        container.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
+        container.style.zIndex = '10000';
+
+        container.innerHTML = `
+            <h2 style="margin-top: 0;">Parsed Threads</h2>
+            <button id="parseButton" style="padding: 8px 12px; margin-right: 5px;">Parse Threads</button>
+            <button id="exportButton" style="padding: 8px 12px;">Export Threads</button>
+            <div id="threads" style="margin-top: 15px;"></div>
+        `;
+
+        document.body.appendChild(container);
+
+        // Add event listeners to buttons
+        document.getElementById('parseButton').addEventListener('click', parseThreads);
+        document.getElementById('exportButton').addEventListener('click', exportThreads);
+    }
+
+    // Function to parse threads
+    function parseThreads() {
+        const threadsContainer = document.getElementById('threads');
+        threadsContainer.innerHTML = ''; // Clear previous results
+
+        // Retrieve previously stored threads from localStorage
+        const storedThreads = JSON.parse(localStorage.getItem('parsedThreads')) || [];
+        const threadSet = new Set(storedThreads.map(thread => thread.url));
+
+        // Select all thread rows
+        const threadRows = document.querySelectorAll('tr.inline_row');
+
+        threadRows.forEach(row => {
+            // Within each row, find the <span> with class 'subject_new' or 'subject_old' containing an <a>
+            const subjectSpan = row.querySelector('span.subject_new a, span.subject_old a');
+            if (subjectSpan) {
+                const title = subjectSpan.textContent.trim();
+                let url = subjectSpan.getAttribute('href').trim();
+
+                // Handle relative URLs by converting them to absolute URLs
+                if (url.startsWith('/')) {
+                    const baseUrl = window.location.origin;
+                    url = baseUrl + url;
+                } else if (!url.startsWith('http')) {
+                    // Assuming 'action=' and other parameters might exist, ensure full URL
+                    url = new URL(url, window.location.href).href;
+                }
+
+                // Check for duplicates
+                if (!threadSet.has(url)) {
+                    threadSet.add(url);
+
+                    // Create a new div to display the thread
+                    const threadDiv = document.createElement('div');
+                    threadDiv.classList.add('thread');
+                    threadDiv.style.marginBottom = '10px';
+
+                    const threadLink = document.createElement('a');
+                    threadLink.href = url;
+                    threadLink.textContent = title;
+                    threadLink.target = '_blank'; // Open in new tab
+                    threadLink.style.textDecoration = 'none';
+                    threadLink.style.color = '#3498db';
+
+                    // Add hover effect
+                    threadLink.addEventListener('mouseover', () => {
+                        threadLink.style.textDecoration = 'underline';
+                    });
+                    threadLink.addEventListener('mouseout', () => {
+                        threadLink.style.textDecoration = 'none';
+                    });
+
+                    threadDiv.appendChild(threadLink);
+                    threadsContainer.appendChild(threadDiv);
+
+                    // Store the new thread in localStorage
+                    storedThreads.push({ title, url });
+                }
+            }
+        });
+
+        if (storedThreads.length === 0) {
+            threadsContainer.innerHTML = '<p>No new threads found.</p>';
+        } else {
+            // Update localStorage with the new set of threads
+            localStorage.setItem('parsedThreads', JSON.stringify(storedThreads));
+            threadsContainer.innerHTML += `<p><strong>Total Threads: ${storedThreads.length}</strong></p>`;
+        }
+    }
+
+    // Function to export threads as JSON
+    function exportThreads() {
+        const storedThreads = JSON.parse(localStorage.getItem('parsedThreads')) || [];
+        if (storedThreads.length === 0) {
+            alert('No threads to export.');
+            return;
+        }
+
+        const dataStr = JSON.stringify(storedThreads, null, 2);
+        const blob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'parsed_threads.json';
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    // Initialize the parser UI
+    function initParser() {
+        createParserUI();
+    }
+
+    // Run the parser initialization after the page loads
+    window.addEventListener('load', initParser);
+})();
