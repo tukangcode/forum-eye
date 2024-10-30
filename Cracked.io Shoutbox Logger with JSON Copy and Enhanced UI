@@ -1,0 +1,332 @@
+// ==UserScript==
+// @name         Cracked.io Shoutbox Logger with JSON Copy and Enhanced UI
+// @namespace    http://tampermonkey.net/
+// @version      1.4
+// @description  Logs shoutbox messages from Cracked.io into a compact floating UI panel with JSON copy and scroll buttons
+// @author       YourName
+// @match        https://cracked.io/
+// @grant        GM_addStyle
+// @run-at       document-end
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // === 1. Adding CSS for the Compact Floating Log Panel, Copy Button, and Scroll Buttons ===
+    GM_addStyle(`
+        #shoutboxLogPanel {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            width: 300px;
+            height: 200px;
+            background-color: rgba(255, 255, 255, 0.95);
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden; /* Hide default scrollbar */
+            padding: 5px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 10000;
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            color: #000;
+            display: flex;
+            flex-direction: column;
+        }
+        #shoutboxLogPanel header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+            position: relative;
+        }
+        #shoutboxLogPanel header h2 {
+            margin: 0;
+            font-size: 14px;
+            flex-grow: 1;
+            text-align: center;
+        }
+        #shoutboxLogPanel header button.copyButton {
+            position: absolute;
+            right: 5px;
+            top: 0;
+            padding: 3px 6px;
+            font-size: 10px;
+            background-color: #28a745;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #shoutboxLogPanel header button.copyButton:hover {
+            background-color: #218838;
+        }
+        #shoutboxLogPanel .scrollButtons {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        #shoutboxLogPanel .scrollButtons button {
+            padding: 2px 5px;
+            font-size: 10px;
+            background-color: #6c757d;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #shoutboxLogPanel .scrollButtons button:hover {
+            background-color: #5a6268;
+        }
+        #shoutboxLogPanel .logEntries {
+            flex-grow: 1;
+            overflow-y: auto;
+            border-top: 1px solid #ccc;
+            padding-top: 5px;
+        }
+        #shoutboxLogPanel .logEntry {
+            margin-bottom: 5px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #ccc;
+        }
+        #shoutboxLogPanel .logEntry:last-child {
+            border-bottom: none;
+        }
+        #shoutboxLogPanel .username {
+            font-weight: bold;
+        }
+        #shoutboxLogPanel .time {
+            color: #666;
+            font-size: 10px;
+        }
+        #shoutboxLogPanel .message {
+            margin-top: 2px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        /* Custom Scrollbar Styling (Optional) */
+        #shoutboxLogPanel .logEntries::-webkit-scrollbar {
+            width: 6px;
+        }
+        #shoutboxLogPanel .logEntries::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        #shoutboxLogPanel .logEntries::-webkit-scrollbar-thumb {
+            background: #888; 
+            border-radius: 3px;
+        }
+        #shoutboxLogPanel .logEntries::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+    `);
+
+    // === 2. Creating the Compact Floating Log Panel with Copy and Scroll Buttons ===
+    const createLogPanel = () => {
+        const panel = document.createElement('div');
+        panel.id = 'shoutboxLogPanel';
+        panel.innerHTML = `
+            <header>
+                <h2>Shoutbox Log</h2>
+                <button class="copyButton">Copy JSON</button>
+            </header>
+            <div class="scrollButtons">
+                <button id="scrollUpBtn">Up</button>
+                <button id="scrollDownBtn">Down</button>
+            </div>
+            <div class="logEntries"></div>
+            <div id="copyFeedback" style="display: none; text-align: center; font-size: 10px; color: green; margin-top: 2px;">Copied!</div>
+        `;
+        document.body.appendChild(panel);
+        return panel;
+    };
+
+    const logPanel = createLogPanel();
+
+    // === 3. Data Structure to Store Logged Messages ===
+    const loggedMessages = [];
+
+    // === 4. Function to Parse and Log a Single Entry ===
+    const parseAndLogEntry = (entryElement) => {
+        try {
+            // Extract Username and Rank
+            const userDiv = entryElement.querySelector('.user');
+            if (!userDiv) return; // Skip if user info is missing
+
+            const userLink = userDiv.querySelector('a');
+            const usernameSpan = userLink ? userLink.querySelector('span') : null;
+            const username = usernameSpan ? usernameSpan.textContent.trim() : 'Unknown User';
+            const rankClass = usernameSpan ? Array.from(usernameSpan.classList).find(cls => cls.endsWith('_rank')) : '';
+            const rank = rankClass ? rankClass.split('_')[0] : 'Rank';
+
+            // Extract Message Content
+            const textDiv = entryElement.querySelector('.text');
+            const message = textDiv ? textDiv.innerText.trim() : '';
+
+            // Extract Time
+            const infoDiv = entryElement.querySelector('.info');
+            const timeSpan = infoDiv ? infoDiv.querySelector('.date') : null;
+            const time = timeSpan ? timeSpan.textContent.trim() : 'Unknown Time';
+
+            // Create a log entry in the panel
+            const logEntriesDiv = logPanel.querySelector('.logEntries');
+
+            const logEntry = document.createElement('div');
+            logEntry.classList.add('logEntry');
+
+            logEntry.innerHTML = `
+                <div class="username">${username} (${rank}) <span class="time">[${time}]</span></div>
+                <div class="message">${sanitizeMessage(message)}</div>
+            `;
+
+            logEntriesDiv.appendChild(logEntry);
+
+            // Scroll to the bottom to show the latest message
+            logEntriesDiv.scrollTop = logEntriesDiv.scrollHeight;
+
+            // Store the message in the array for exporting
+            loggedMessages.push({
+                username: username,
+                rank: rank,
+                time: time,
+                message: message
+            });
+
+        } catch (error) {
+            console.error('Error parsing entry:', error);
+        }
+    };
+
+    // === 5. Function to Sanitize Message Content ===
+    const sanitizeMessage = (message) => {
+        // Convert URLs to clickable links while sanitizing
+        // This function retains <a> tags for links and sanitizes other HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.textContent = message;
+        let sanitized = tempDiv.innerHTML;
+
+        // Convert URLs to clickable links
+        sanitized = sanitized.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank">$1</a>');
+
+        return sanitized;
+    };
+
+    // === 6. Parsing Existing Entries on Page Load ===
+    const parseExistingEntries = () => {
+        const shoutboxContainers = document.querySelectorAll('.data.shoutbox-messages');
+        shoutboxContainers.forEach(container => {
+            const entries = container.querySelectorAll('.entry');
+            entries.forEach(entry => {
+                parseAndLogEntry(entry);
+            });
+        });
+    };
+
+    // === 7. Setting Up MutationObserver for New Entries ===
+    const setupShoutboxObserver = () => {
+        const shoutboxContainers = document.querySelectorAll('.data.shoutbox-messages');
+        shoutboxContainers.forEach(container => {
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach(mutation => {
+                    mutation.addedNodes.forEach(node => {
+                        if (node.nodeType === 1 && node.classList.contains('entry')) {
+                            parseAndLogEntry(node);
+                        }
+                    });
+                });
+            });
+
+            observer.observe(container, { childList: true, subtree: false });
+        });
+    };
+
+    // === 8. Handling Dynamic Shoutbox Loading ===
+    const setupBodyObserver = () => {
+        const bodyObserver = new MutationObserver((mutations, observer) => {
+            mutations.forEach(mutation => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) {
+                        // Check if a new shoutbox container has been added
+                        if (node.classList.contains('data') && node.classList.contains('shoutbox-messages')) {
+                            parseExistingEntries(); // Parse existing entries in the new container
+                            setupShoutboxObserver(); // Re-attach observer for the new container
+                            observer.disconnect(); // Stop observing once the shoutbox is found
+                        }
+                    }
+                });
+            });
+        });
+
+        bodyObserver.observe(document.body, { childList: true, subtree: true });
+    };
+
+    // === 9. Copy Functionality ===
+    const setupCopyButton = () => {
+        const copyButton = logPanel.querySelector('.copyButton');
+        const copyFeedback = logPanel.querySelector('#copyFeedback');
+
+        if (!copyButton) return;
+
+        copyButton.addEventListener('click', () => {
+            if (loggedMessages.length === 0) {
+                alert('No messages to copy.');
+                return;
+            }
+
+            const dataStr = JSON.stringify(loggedMessages, null, 2);
+
+            // Use the Clipboard API to copy text
+            navigator.clipboard.writeText(dataStr).then(() => {
+                // Show feedback to the user
+                copyFeedback.style.display = 'block';
+                setTimeout(() => {
+                    copyFeedback.style.display = 'none';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                alert('Failed to copy shoutbox logs.');
+            });
+        });
+    };
+
+    // === 10. Scroll Button Functionality ===
+    const setupScrollButtons = () => {
+        const scrollUpBtn = logPanel.querySelector('#scrollUpBtn');
+        const scrollDownBtn = logPanel.querySelector('#scrollDownBtn');
+        const logEntriesDiv = logPanel.querySelector('.logEntries');
+
+        if (scrollUpBtn && logEntriesDiv) {
+            scrollUpBtn.addEventListener('click', () => {
+                logEntriesDiv.scrollBy({
+                    top: -50, // Scroll up by 50px
+                    behavior: 'smooth'
+                });
+            });
+        }
+
+        if (scrollDownBtn && logEntriesDiv) {
+            scrollDownBtn.addEventListener('click', () => {
+                logEntriesDiv.scrollBy({
+                    top: 50, // Scroll down by 50px
+                    behavior: 'smooth'
+                });
+            });
+        }
+    };
+
+    // === 11. Initial Execution ===
+    const init = () => {
+        parseExistingEntries();
+        setupShoutboxObserver();
+        setupBodyObserver();
+        setupCopyButton();
+        setupScrollButtons();
+    };
+
+    // Run the script once the DOM is fully loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+})();
