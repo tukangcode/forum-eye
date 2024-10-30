@@ -1,0 +1,87 @@
+// ==UserScript==
+// @name         BreachForums Shoutbox Logger
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  Log the shoutbox chat into a fixed window on the right side and allow export to text file.
+// @author       tukangcode & Ai-sama
+// @match        https://breachforums.st/
+// @grant        GM_addStyle
+// @grant        GM_setClipboard
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // CSS for the fixed log window
+    GM_addStyle(`
+        #logWindow {
+            position: fixed;
+            top: 50px;
+            right: 10px;
+            width: 300px;
+            height: 500px;
+            background-color: #f9f9f9;
+            border: 1px solid #ccc;
+            overflow: auto;
+            z-index: 10000;
+            padding: 5px;
+            color: black;
+            font-size: 12px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        #exportBtn {
+            display: block;
+            width: 100%;
+            padding: 8px 0;
+            margin-top: 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    `);
+
+    // Create the log window and append to body
+    let logWindow = document.createElement('div');
+    logWindow.id = 'logWindow';
+    document.body.appendChild(logWindow);
+
+    // Function to add messages to the log
+    function logMessage(msg) {
+        let message = document.createElement('div');
+        message.textContent = msg;
+        logWindow.appendChild(message);
+    }
+
+    // Observe changes in the shoutbox and log messages
+    let targetNode = document.querySelector('.shoutarea');
+    let config = { childList: true, subtree: true };
+    let observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            mutation.addedNodes.forEach((node) => {
+                if (node.nodeType === 1 && node.classList.contains('msgShout')) { // Check if it's an element and has class 'msgShout'
+                    let content = node.querySelector('.content_msgShout').textContent;
+                    let username = node.querySelector('.username_msgShout').textContent;
+                    let message = `${username}: ${content}`;
+                    logMessage(message);
+                }
+            });
+        });
+    });
+
+    observer.observe(targetNode, config);
+
+    // Add export button
+    let exportBtn = document.createElement('button');
+    exportBtn.id = 'exportBtn';
+    exportBtn.textContent = 'Export Log';
+    exportBtn.onclick = function() {
+        let textContent = Array.from(logWindow.querySelectorAll('div'))
+                               .map(el => el.textContent)
+                               .join('\n');
+        GM_setClipboard(textContent);
+        alert('Log copied to clipboard!');
+    };
+    logWindow.appendChild(exportBtn);
+})();
